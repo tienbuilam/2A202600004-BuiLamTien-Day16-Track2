@@ -23,7 +23,7 @@ resource "aws_subnet" "private" {
   count             = 2
   vpc_id            = aws_vpc.ai_vpc.id
   cidr_block        = cidrsubnet(aws_vpc.ai_vpc.cidr_block, 8, count.index + 10)
-  availability_zone = data.aws_availability_zones.available.names[count.index]
+  availability_zone = ["us-east-1a", "us-east-1b"][count.index]
   tags = { Name = "Private-Subnet-${count.index}" }
 }
 
@@ -112,8 +112,8 @@ resource "aws_security_group" "bastion_sg" {
   }
 }
 
-resource "aws_security_group" "gpu_sg" {
-  name        = "ai-gpu-node-sg"
+resource "aws_security_group" "cpu_sg" {
+  name        = "ai-cpu-node-sg"
   description = "Allow SSH from Bastion and HTTP from ALB"
   vpc_id      = aws_vpc.ai_vpc.id
 
@@ -172,14 +172,9 @@ resource "aws_instance" "bastion" {
   tags = { Name = "AI-Bastion-Host" }
 }
 
-# 5. GPU Instance
-data "aws_ami" "deep_learning" {
-  most_recent = true
-  owners      = ["amazon"]
-  filter {
-    name   = "name"
-    values = ["Deep Learning Base OSS Nvidia Driver GPU AMI (Ubuntu 22.04)*"]
-  }
+# 5. CPU Instance — Amazon Linux 2023 (fallback, no cpu quota needed)
+locals {
+  cpu_ami_id = "ami-0102a36b3e9d5e4df"  # Amazon Linux 2023, us-east-1
 }
 
 resource "aws_iam_role" "ai_role" {
@@ -204,11 +199,11 @@ resource "aws_iam_instance_profile" "ai_profile" {
   role = aws_iam_role.ai_role.name
 }
 
-resource "aws_instance" "gpu_node" {
-  ami                    = data.aws_ami.deep_learning.id
-  instance_type          = "g4dn.xlarge" 
+resource "aws_instance" "cpu_node" {
+  ami                    = local.cpu_ami_id
+  instance_type          = "r5.2xlarge"  # 8 vCPU, 64GB RAM — memory optimized CPU node
   subnet_id              = aws_subnet.private[0].id
-  vpc_security_group_ids = [aws_security_group.gpu_sg.id]
+  vpc_security_group_ids = [aws_security_group.cpu_sg.id]
   key_name               = aws_key_pair.lab_key.key_name
   iam_instance_profile   = aws_iam_instance_profile.ai_profile.name
 
@@ -222,7 +217,7 @@ resource "aws_instance" "gpu_node" {
     model_id = var.model_id
   })
 
-  tags = { Name = "AI-Inference-Node" }
+  tags = { Name = "AI-CPU-Node" }
 }
 
 # 6. Load Balancer
@@ -264,6 +259,6 @@ resource "aws_lb_listener" "ai_listener" {
 
 resource "aws_lb_target_group_attachment" "ai_tg_attach" {
   target_group_arn = aws_lb_target_group.ai_tg.arn
-  target_id        = aws_instance.gpu_node.id
+  target_id        = aws_instance.cpu_node.id
   port             = 8000
 }

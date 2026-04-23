@@ -11,6 +11,6 @@ output "endpoint_url" {
   value = "http://${aws_lb.ai_alb.dns_name}/v1/completions"
 }
 
-output "gpu_private_ip" {
-  value = aws_instance.gpu_node.private_ip
+output "cpu_node_private_ip" {
+  value = aws_instance.cpu_node.private_ip
 }
